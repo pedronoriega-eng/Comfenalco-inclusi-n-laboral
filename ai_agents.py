@@ -28,7 +28,7 @@ except ImportError:
 # ║  CONFIGURACIÓN                                                             ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
-MODELO_GEMINI = "gemini-2.0-flash"
+MODELO_GEMINI = "gemini-1.5-flash"
 
 # Marco legal referenciado por los agentes
 MARCO_LEGAL = """
