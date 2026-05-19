@@ -578,17 +578,30 @@ JSON requerido:
     return {"texto_crudo": texto}
 
 
-def verificar_api_key(api_key: str) -> bool:
-    """Verifica que la API key de Gemini sea válida."""
-    if not GEMINI_DISPONIBLE or not api_key:
-        return False
+def verificar_api_key(api_key: str) -> tuple:
+    """Verifica que la API key de Gemini sea válida y retorna (es_valida, mensaje_error)."""
+    if not GEMINI_DISPONIBLE:
+        return False, "La librería 'google-generativeai' no está disponible en el servidor."
+    if not api_key:
+        return False, "La clave API está vacía."
     try:
+        # Limpiar posibles espacios en blanco alrededor de la clave
+        api_key = api_key.strip()
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(MODELO_GEMINI)
         response = model.generate_content(
             "Responde solo 'OK'.",
             generation_config=genai.GenerationConfig(max_output_tokens=10),
         )
-        return "OK" in response.text.upper()
-    except Exception:
-        return False
+        if response.text:
+            return True, "API Key válida"
+        return False, "El modelo no retornó ninguna respuesta."
+    except Exception as e:
+        error_msg = str(e)
+        # Simplificar mensajes de error comunes de Google
+        if "API_KEY_INVALID" in error_msg:
+            return False, "La API Key ingresada no es válida para Google Cloud."
+        elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
+            return False, "Se ha excedido la cuota o límite de tu API Key."
+        return False, f"Error al conectar con Google Gemini: {error_msg}"
+

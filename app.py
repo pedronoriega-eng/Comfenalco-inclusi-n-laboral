@@ -517,12 +517,13 @@ with st.sidebar:
     if api_key_input and not st.session_state.api_verificada:
         if st.button("✓ Verificar API Key", use_container_width=True):
             with st.spinner("Verificando..."):
-                if verificar_api_key(api_key_input):
+                valida, mensaje = verificar_api_key(api_key_input)
+                if valida:
                     st.session_state.api_verificada = True
                     st.success("✓ API Key válida")
                     st.rerun()
                 else:
-                    st.error("✗ API Key inválida")
+                    st.error(f"✗ {mensaje}")
 
     if st.session_state.api_verificada:
         st.markdown('<span class="badge badge-success">● IA Conectada</span>',
