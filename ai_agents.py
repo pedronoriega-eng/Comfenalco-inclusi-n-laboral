@@ -282,12 +282,16 @@ class SistemaMultiagente:
             self._log("   ⚠ Ninguna foto pudo ser leída correctamente.")
             return self._vision_default()
 
-        # 2. Llamada única a Gemini con todas las fotos, desactivando filtros de seguridad
+        # 2. Llamada única a Gemini con todas las fotos, desactivando filtros de seguridad y forzando JSON
         self._log(f"   📡 Enviando {len(rutas_validas)} fotos simultáneamente a Gemini...")
         try:
             response = self.model.generate_content(
                 content_parts,
-                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=4096),
+                generation_config=genai.GenerationConfig(
+                    temperature=0.1, 
+                    max_output_tokens=4096,
+                    response_mime_type="application/json"
+                ),
                 safety_settings={
                     genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
                     genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
@@ -397,6 +401,7 @@ class SistemaMultiagente:
                 generation_config=genai.GenerationConfig(
                     temperature=0.2,
                     max_output_tokens=8192,
+                    response_mime_type="application/json"
                 ),
             )
 
@@ -705,6 +710,7 @@ JSON requerido:
                 generation_config=genai.GenerationConfig(
                     temperature=0.1,
                     max_output_tokens=8192,
+                    response_mime_type="application/json"
                 ),
             )
             texto_resp = response.text.strip()
