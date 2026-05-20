@@ -15,7 +15,9 @@ import json
 import os
 import base64
 import re
+import io
 from pathlib import Path
+from PIL import Image
 
 try:
     import google.generativeai as genai
@@ -81,52 +83,39 @@ Incluye referencias legales específicas (artículos de ley).
 NO uses formato markdown, solo texto plano en un párrafo continuo.
 """
 
-PROMPT_CLASIFICACION_Y_ANALISIS = """
-Eres el Agente A-Vision: Experto en Accesibilidad Física e Inclusión Laboral.
-Analiza detenidamente la imagen adjunta.
-
-Tu tarea consta de dos partes:
-1. CLASIFICACIÓN: Identifica qué tipo de espacio físico se muestra principalmente en la imagen. Clasifícalo estrictamente en una de estas categorías:
-   - "entrada": Entrada principal, acceso exterior, fachada, puerta de ingreso.
-   - "baño": Batería de baños, inodoro, lavamanos, sanitarios.
-   - "cafeteria": Comedor, cocina, cafetería, área de almuerzo.
-   - "otro": Pasillos, rampas, oficinas, áreas de trabajo generales.
-
-2. ANÁLISIS DE ACCESIBILIDAD: Genera un análisis técnico detallado (mínimo 100 palabras) sobre la accesibilidad física y barreras de este espacio específico, referenciando las leyes colombianas (Ley 1618 de 2013, NTC 4143, NTC 6047).
+PROMPT_VISION_BATCH = """
+Eres el Agente A-Vision: Experto en Accesibilidad e Inclusión Laboral.
+Analiza detenidamente TODAS las imágenes adjuntas, las cuales pertenecen a un mismo entorno laboral.
+Para facilitar la referencia, las fotos están en el mismo orden que fueron cargadas, empezando por el índice 0.
 
 {marco_legal}
 
-Responde estrictamente en formato JSON con la siguiente estructura (sin markdown ni ```json):
+Tu tarea consta de dos partes:
+1. MAPEO FOTOGRÁFICO: Identifica la mejor foto (por su índice, 0 a N) que represente cada una de estas áreas clave: "entrada", "baños", y "cafetería". Si no hay foto para un área, asigna -1.
+2. ANÁLISIS INTEGRAL: Genera un análisis técnico detallado consolidando lo visto en TODAS las fotos para cada categoría, referenciando las leyes colombianas (Ley 1618 de 2013, NTC 4143, NTC 6047). Cada análisis debe ser un párrafo continuo de al menos 80 palabras.
+Si un área no tiene foto, redacta un análisis técnico preventivo indicando que no hay registro fotográfico pero se sugieren mejoras generales.
+
+Responde estrictamente en formato JSON con la siguiente estructura (sin markdown, sin ```json):
 {{
-    "categoria": "entrada" | "baño" | "cafeteria" | "otro",
-    "analisis": "Párrafo técnico continuo de análisis detallado..."
-}}
-"""
-
-PROMPT_SINTESIS_VISION = """
-Eres el Agente A-Vision: Experto en Accesibilidad e Inclusión Laboral.
-A partir de los análisis de las fotos de las instalaciones que ya se realizaron:
-
-ANALISIS INDIVIDUALES DISPONIBLES:
-{analisis_individuales}
-
-Tu tarea es generar un análisis completo y unificado para todos los aspectos del puesto de trabajo en formato JSON. Cada campo debe ser un párrafo técnico continuo (mínimo 80 palabras) con referencias a la normativa colombiana y al Programa Talento Sin Barreras.
-Si un área (entrada, baños, cafetería) NO tiene análisis individual disponible en la lista de arriba, redacta un análisis técnico preventivo indicando que no hay registro fotográfico pero se sugieren mejoras generales.
-
-Responde ÚNICAMENTE con el JSON, sin formato markdown ni ```json:
-{{
-    "acceso_principal": "Análisis de la entrada principal...",
-    "banos": "Análisis de la batería de baños...",
-    "cafeteria": "Análisis del área de cafetería/comedor...",
-    "rampas": "Análisis de rampas, desniveles y escaleras...",
-    "informacion_comunicacion": "Análisis de señalización y sistemas de comunicación...",
-    "actitudinales_sociales": "Análisis de barreras actitudinales y sociales...",
-    "condiciones_biologico": "Exposición a riesgos biológicos...",
-    "condiciones_psicosocial": "Factores de riesgo psicosocial...",
-    "condiciones_biomecanico": "Riesgos biomecánicos (posturas, movimientos, cargas)...",
-    "condiciones_fisico": "Condiciones físicas (iluminación, ruido, ventilación)...",
-    "condiciones_quimico": "Exposición a sustancias químicas (si no aplica, justificar)...",
-    "condiciones_seguridad": "Condiciones de seguridad (riesgo locativo, emergencias)..."
+    "mapeo": {{
+        "entrada": 0,
+        "banos": 2,
+        "cafeteria": -1
+    }},
+    "analisis": {{
+        "acceso_principal": "Análisis consolidado de la entrada...",
+        "banos": "Análisis consolidado de baños...",
+        "cafeteria": "Análisis consolidado de cafetería...",
+        "rampas": "Análisis de rampas, pasillos y escaleras...",
+        "informacion_comunicacion": "Análisis de señalización y sistemas de comunicación...",
+        "actitudinales_sociales": "Análisis de barreras actitudinales y sociales evidentes o preventivas...",
+        "condiciones_biologico": "Exposición a riesgos biológicos...",
+        "condiciones_psicosocial": "Factores de riesgo psicosocial...",
+        "condiciones_biomecanico": "Riesgos biomecánicos (posturas, movimientos, cargas)...",
+        "condiciones_fisico": "Condiciones físicas (iluminación, ruido, ventilación)...",
+        "condiciones_quimico": "Exposición a sustancias químicas (si no aplica, justificar)...",
+        "condiciones_seguridad": "Condiciones de seguridad (riesgo locativo, emergencias)..."
+    }}
 }}
 """
 
@@ -260,94 +249,84 @@ class SistemaMultiagente:
     def ejecutar_vision(self, rutas_fotos: list) -> dict:
         """
         Ejecuta el Agente A-Vision sobre las fotos proporcionadas
-        clasificándolas primero individualmente.
+        procesándolas en un solo lote para evitar límites de API (Rate Limits).
         """
-        self._log("🔍 [A-Vision] Iniciando análisis visual de accesibilidad...")
+        self._log("🔍 [A-Vision] Iniciando análisis visual de accesibilidad en lote...")
 
-        analisis_individuales = []
-        fotos_mapeadas = {}
-        textos_por_categoria = {"entrada": "", "baño": "", "cafeteria": "", "otro": ""}
+        if not rutas_fotos:
+            self._log("   ⚠ No hay fotos para analizar.")
+            return self._vision_default()
 
-        for ruta in rutas_fotos:
+        # 1. Preparar las imágenes y redimensionarlas para evitar payload muy grande
+        content_parts = [PROMPT_VISION_BATCH.format(marco_legal=MARCO_LEGAL)]
+        rutas_validas = []
+
+        for i, ruta in enumerate(rutas_fotos):
             if not os.path.exists(ruta):
                 continue
             
-            self._log(f"   📷 Procesando imagen: {os.path.basename(ruta)}")
-            with open(ruta, "rb") as f:
-                img_data = f.read()
-
-            ext = Path(ruta).suffix.lower()
-            mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-            mime_type = mime_map.get(ext, "image/jpeg")
-
-            img_part = {"mime_type": mime_type, "data": img_data}
-            prompt = PROMPT_CLASIFICACION_Y_ANALISIS.format(marco_legal=MARCO_LEGAL)
-
             try:
-                response = self.model.generate_content(
-                    [prompt, img_part],
-                    generation_config=genai.GenerationConfig(temperature=0.2, max_output_tokens=1024)
-                )
-                texto = response.text.strip()
-                texto = re.sub(r'^```json\s*', '', texto)
-                texto = re.sub(r'\s*```$', '', texto)
+                # Redimensionar a máx 800x800 para que 24 imágenes pesen ~2-3MB total
+                img = Image.open(ruta)
+                img.thumbnail((800, 800))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=85)
+                img_data = buffer.getvalue()
                 
-                resp_json = json.loads(texto)
-                cat = resp_json.get("categoria", "otro").lower()
-                
-                # Aceptar variaciones y comillas extras
-                if "bañ" in cat or "bano" in cat:
-                    cat = "baño"
-                elif "entr" in cat:
-                    cat = "entrada"
-                elif "caf" in cat:
-                    cat = "cafeteria"
-                else:
-                    cat = "otro"
-
-                analisis = resp_json.get("analisis", "")
-                self._log(f"      ↳ Clasificada como: '{cat}'")
-
-                if textos_por_categoria[cat]:
-                    textos_por_categoria[cat] += "\n\n" + analisis
-                else:
-                    textos_por_categoria[cat] = analisis
-
-                if cat == "entrada" and 2 not in fotos_mapeadas:
-                    fotos_mapeadas[2] = ruta
-                elif cat == "baño" and 4 not in fotos_mapeadas:
-                    fotos_mapeadas[4] = ruta
-                elif cat == "cafeteria" and 6 not in fotos_mapeadas:
-                    fotos_mapeadas[6] = ruta
-
-                analisis_individuales.append(f"FOTO TIPO: {cat}\nANALISIS: {analisis}")
-
+                content_parts.append(f"--- FOTO {len(rutas_validas)} ---")
+                content_parts.append({"mime_type": "image/jpeg", "data": img_data})
+                rutas_validas.append(ruta)
+                self._log(f"   📷 Cargada: {os.path.basename(ruta)}")
             except Exception as e:
-                self._log(f"      ✗ Error analizando imagen: {e}")
+                self._log(f"   ✗ Error procesando {ruta}: {e}")
 
-        self._log("   📡 Sintetizando análisis integral del entorno...")
-        
-        texto_individuales = "\n---\n".join(analisis_individuales) if analisis_individuales else "No se proporcionaron fotos."
-        prompt_sintesis = PROMPT_SINTESIS_VISION.format(analisis_individuales=texto_individuales)
+        if not rutas_validas:
+            self._log("   ⚠ Ninguna foto pudo ser leída correctamente.")
+            return self._vision_default()
 
+        # 2. Llamada única a Gemini con todas las fotos
+        self._log(f"   📡 Enviando {len(rutas_validas)} fotos simultáneamente a Gemini...")
         try:
             response = self.model.generate_content(
-                prompt_sintesis,
-                generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=4096)
+                content_parts,
+                generation_config=genai.GenerationConfig(temperature=0.2, max_output_tokens=4096)
             )
-            texto_sintesis = response.text.strip()
-            texto_sintesis = re.sub(r'^```json\s*', '', texto_sintesis)
-            texto_sintesis = re.sub(r'\s*```$', '', texto_sintesis)
             
-            resultado = json.loads(texto_sintesis)
-            resultado["fotos_mapeadas"] = fotos_mapeadas
-            self._log("   ✓ [A-Vision] Análisis visual completado exitosamente.")
-            return resultado
+            texto = response.text.strip()
+            texto = re.sub(r'^```json\s*', '', texto)
+            texto = re.sub(r'\s*```$', '', texto)
+            
+            resp_json = json.loads(texto)
+            mapeo = resp_json.get("mapeo", {})
+            analisis = resp_json.get("analisis", {})
+            
+            # Construir fotos_mapeadas
+            fotos_mapeadas = {}
+            # Fila 2 = Entrada
+            idx_entrada = mapeo.get("entrada", -1)
+            if idx_entrada != -1 and 0 <= idx_entrada < len(rutas_validas):
+                fotos_mapeadas[2] = rutas_validas[idx_entrada]
+            
+            # Fila 4 = Baños
+            idx_banos = mapeo.get("banos", -1)
+            if idx_banos != -1 and 0 <= idx_banos < len(rutas_validas):
+                fotos_mapeadas[4] = rutas_validas[idx_banos]
+            
+            # Fila 6 = Cafetería
+            idx_cafeteria = mapeo.get("cafeteria", -1)
+            if idx_cafeteria != -1 and 0 <= idx_cafeteria < len(rutas_validas):
+                fotos_mapeadas[6] = rutas_validas[idx_cafeteria]
+
+            analisis["fotos_mapeadas"] = fotos_mapeadas
+            self._log("   ✓ [A-Vision] Análisis visual en lote completado exitosamente.")
+            return analisis
 
         except Exception as e:
-            self._log(f"   ✗ Error en síntesis de A-Vision: {e}")
+            self._log(f"   ✗ Error en ejecución en lote de A-Vision: {e}")
             res_def = self._vision_default()
-            res_def["fotos_mapeadas"] = fotos_mapeadas
+            res_def["fotos_mapeadas"] = {}
             return res_def
 
     def _vision_default(self):
