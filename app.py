@@ -14,7 +14,14 @@ import io
 from pathlib import Path
 from datetime import datetime
 
-# ── Módulos del proyecto ─────────────────────────────────────────────
+# ── Módulos del proyecto con recarga forzada para Streamlit Cloud ────
+import importlib
+import motor_documental
+import ai_agents
+
+importlib.reload(motor_documental)
+importlib.reload(ai_agents)
+
 from motor_documental import DatosProyecto, MotorDocumental, generar_informe
 from ai_agents import (
     SistemaMultiagente,
