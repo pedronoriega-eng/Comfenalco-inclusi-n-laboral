@@ -30,7 +30,7 @@ except ImportError:
 # ║  CONFIGURACIÓN                                                             ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
-MODELO_GEMINI = "gemini-2.5-flash"
+MODELO_GEMINI = "gemini-1.5-flash"
 
 # Marco legal referenciado por los agentes
 MARCO_LEGAL = """
@@ -223,10 +223,11 @@ class SistemaMultiagente:
     el análisis completo de inclusión laboral.
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, modelo: str = None):
         """
         Args:
             api_key: Clave de API de Google Gemini.
+            modelo: Modelo principal a utilizar (ej. 'gemini-1.5-flash').
         """
         if not GEMINI_DISPONIBLE:
             raise ImportError(
@@ -234,9 +235,42 @@ class SistemaMultiagente:
                 "Ejecute: pip install google-generativeai"
             )
 
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(MODELO_GEMINI)
+        genai.configure(api_key=api_key.strip())
+        self.modelo_actual = modelo if modelo else MODELO_GEMINI
+        self.model = genai.GenerativeModel(self.modelo_actual)
         self._logs = []
+
+    def _generar_con_fallback(self, content, generation_config=None, safety_settings=None):
+        """
+        Envía una solicitud a Gemini intentando el modelo actual,
+        y si falla por quota u otro error, realiza un fallback automático
+        a otros modelos de Gemini para garantizar la ejecución.
+        """
+        modelos_a_probar = [self.modelo_actual, "gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+        # Eliminar duplicados manteniendo el orden
+        modelos_a_probar = list(dict.fromkeys([m for m in modelos_a_probar if m]))
+        
+        last_error = None
+        for mod in modelos_a_probar:
+            self._log(f"   📡 Enviando solicitud a Gemini con el modelo: {mod}...")
+            try:
+                model_inst = genai.GenerativeModel(mod)
+                response = model_inst.generate_content(
+                    content,
+                    generation_config=generation_config,
+                    safety_settings=safety_settings
+                )
+                self._log(f"   ✓ Respuesta exitosa con el modelo {mod}.")
+                self.modelo_actual = mod
+                self.model = model_inst
+                return response
+            except Exception as e:
+                err_msg = str(e)
+                last_error = e
+                self._log(f"   ⚠ Error con el modelo {mod}: {err_msg}")
+                continue
+        
+        raise last_error
 
     def _log(self, msg):
         self._logs.append(msg)
@@ -285,7 +319,7 @@ class SistemaMultiagente:
         # 2. Llamada única a Gemini con todas las fotos, desactivando filtros de seguridad y forzando JSON
         self._log(f"   📡 Enviando {len(rutas_validas)} fotos simultáneamente a Gemini...")
         try:
-            response = self.model.generate_content(
+            response = self._generar_con_fallback(
                 content_parts,
                 generation_config=genai.GenerationConfig(
                     temperature=0.1, 
@@ -396,7 +430,7 @@ class SistemaMultiagente:
 
         try:
             self._log("   📡 Consultando modelo de lenguaje para análisis jurídico...")
-            response = self.model.generate_content(
+            response = self._generar_con_fallback(
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.2,
@@ -650,7 +684,7 @@ def extraer_texto_de_archivo(ruta: str) -> str:
             return f"Formato no soportado: {e}"
 
 
-def extraer_datos_manual(ruta_manual: str, api_key: str = None) -> dict:
+def extraer_datos_manual(ruta_manual: str, api_key: str = None, modelo: str = None) -> dict:
     """
     Extrae datos del Manual de Funciones usando Gemini.
     Soporta docx, pdf, xls, txt, doc.
@@ -658,10 +692,10 @@ def extraer_datos_manual(ruta_manual: str, api_key: str = None) -> dict:
     texto = extraer_texto_de_archivo(ruta_manual)
 
     if api_key and GEMINI_DISPONIBLE:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(MODELO_GEMINI)
-
-        prompt = f"""
+        try:
+            genai.configure(api_key=api_key.strip())
+            
+            prompt = f"""
 Analiza el siguiente texto de un Manual de Funciones/Descripción de Cargo y extrae la información en formato JSON. Responde ÚNICAMENTE con el JSON (sin markdown ni ```json).
 Si un dato no existe en el manual, déjalo como una cadena vacía "".
 
@@ -704,49 +738,77 @@ JSON requerido:
     "recursos_epp": "Elementos de Protección Personal (EPP)"
 }}
 """
-        try:
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json"
-                ),
-            )
+            # Intentar con fallback de modelos
+            modelos_a_probar = [modelo, MODELO_GEMINI, "gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+            modelos_a_probar = list(dict.fromkeys([m for m in modelos_a_probar if m]))
+            
+            response = None
+            last_err = None
+            for mod in modelos_a_probar:
+                try:
+                    model = genai.GenerativeModel(mod)
+                    response = model.generate_content(
+                        prompt,
+                        generation_config=genai.GenerationConfig(
+                            temperature=0.1,
+                            max_output_tokens=8192,
+                            response_mime_type="application/json"
+                        ),
+                    )
+                    if response and response.text:
+                        break
+                except Exception as e:
+                    last_err = e
+                    continue
+            
+            if not response or not response.text:
+                if last_err:
+                    raise last_err
+                else:
+                    raise Exception("No se obtuvo respuesta de ningún modelo de Gemini.")
+            
             texto_resp = response.text.strip()
             texto_resp = re.sub(r'^```json\s*', '', texto_resp)
             texto_resp = re.sub(r'\s*```$', '', texto_resp)
             return json.loads(texto_resp)
-        except Exception:
+        except Exception as e:
+            print(f"Error en extraer_datos_manual: {e}")
             pass
 
     return {"texto_crudo": texto}
 
 
-def verificar_api_key(api_key: str) -> tuple:
+def verificar_api_key(api_key: str, modelo: str = None) -> tuple:
     """Verifica que la API key de Gemini sea válida y retorna (es_valida, mensaje_error)."""
     if not GEMINI_DISPONIBLE:
         return False, "La librería 'google-generativeai' no está disponible en el servidor."
     if not api_key:
         return False, "La clave API está vacía."
-    try:
-        # Limpiar posibles espacios en blanco alrededor de la clave
-        api_key = api_key.strip()
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(MODELO_GEMINI)
-        response = model.generate_content(
-            "Responde solo 'OK'.",
-            generation_config=genai.GenerationConfig(max_output_tokens=10),
-        )
-        if response.text:
-            return True, "API Key válida"
-        return False, "El modelo no retornó ninguna respuesta."
-    except Exception as e:
-        error_msg = str(e)
-        # Simplificar mensajes de error comunes de Google
-        if "API_KEY_INVALID" in error_msg:
-            return False, "La API Key ingresada no es válida para Google Cloud."
-        elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
-            return False, "Se ha excedido la cuota o límite de tu API Key."
-        return False, f"Error al conectar con Google Gemini: {error_msg}"
+    
+    # Probar con varios modelos
+    modelos_a_probar = [modelo, MODELO_GEMINI, "gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+    modelos_a_probar = list(dict.fromkeys([m for m in modelos_a_probar if m]))
+    
+    errores = []
+    for mod in modelos_a_probar:
+        try:
+            api_key = api_key.strip()
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(mod)
+            response = model.generate_content(
+                "Responde solo 'OK'.",
+                generation_config=genai.GenerationConfig(max_output_tokens=10),
+            )
+            if response.text:
+                return True, f"API Key válida (probado exitosamente con {mod})"
+        except Exception as e:
+            errores.append(f"{mod}: {e}")
+            
+    # Si todos fallaron
+    error_msg = "; ".join(errores)
+    if "API_KEY_INVALID" in error_msg:
+        return False, "La API Key ingresada no es válida para Google Cloud."
+    elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
+        return False, "Se ha excedido la cuota o límite de tu API Key en todos los modelos probados (1.5-flash, 2.5-flash)."
+    return False, f"Error al conectar con Google Gemini: {errores[0]}"
 

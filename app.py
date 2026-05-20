@@ -339,6 +339,7 @@ def init_session_state():
         "autenticado": False,
         "api_key": api_key_default,
         "api_verificada": api_verificada_default,
+        "modelo_gemini": "gemini-1.5-flash",
         "plantilla_cargada": False,
         "plantilla_bytes": None,
         "manual_cargado": False,
@@ -537,11 +538,19 @@ with st.sidebar:
         st.session_state.api_key = api_key_input
         st.session_state.api_verificada = False
 
+    # Modelo a usar
+    modelo_seleccionado = st.selectbox(
+        "Modelo de IA principal",
+        options=["gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"],
+        key="modelo_gemini",
+        help="Recomendado: gemini-1.5-flash para evitar errores de cuota (429) en claves gratuitas. El sistema cuenta con fallback automático si el modelo seleccionado falla."
+    )
+
     # Verificar API Key
     if api_key_input and not st.session_state.api_verificada:
         if st.button("✓ Verificar API Key", use_container_width=True):
             with st.spinner("Verificando..."):
-                valida, mensaje = verificar_api_key(api_key_input)
+                valida, mensaje = verificar_api_key(api_key_input, modelo=modelo_seleccionado)
                 if valida:
                     st.session_state.api_verificada = True
                     st.success("✓ API Key válida")
@@ -844,6 +853,7 @@ with tab_analisis:
                         manual_data = extraer_datos_manual(
                             st.session_state.manual_path,
                             api_key,
+                            modelo=st.session_state.modelo_gemini,
                         )
                         if "cargo_nombre" in manual_data:
                             datos_cargo["nombre"] = manual_data["cargo_nombre"]
@@ -870,7 +880,7 @@ with tab_analisis:
                     )
 
                 try:
-                    sistema = SistemaMultiagente(api_key)
+                    sistema = SistemaMultiagente(api_key, modelo=st.session_state.modelo_gemini)
                     resultado = sistema.ejecutar_analisis_completo(
                         rutas_fotos=st.session_state.fotos_cargadas,
                         datos_cargo=datos_cargo,
@@ -968,6 +978,7 @@ with tab_datos:
                     manual_data = extraer_datos_manual(
                         st.session_state.manual_path,
                         obtener_api_key(),
+                        modelo=st.session_state.modelo_gemini,
                     )
                     st.session_state.manual_datos = manual_data
                     
