@@ -311,10 +311,27 @@ st.markdown("""
 
 def init_session_state():
     """Inicializa variables de sesión."""
+    # Detectar API key de secrets o env
+    api_key_default = ""
+    api_verificada_default = False
+    
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key_default = st.secrets["GEMINI_API_KEY"]
+            api_verificada_default = True
+    except Exception:
+        pass
+        
+    if not api_key_default:
+        env_key = os.environ.get("GEMINI_API_KEY", "")
+        if env_key:
+            api_key_default = env_key
+            api_verificada_default = True
+
     defaults = {
         "autenticado": False,
-        "api_key": "",
-        "api_verificada": False,
+        "api_key": api_key_default,
+        "api_verificada": api_verificada_default,
         "plantilla_cargada": False,
         "plantilla_bytes": None,
         "manual_cargado": False,
