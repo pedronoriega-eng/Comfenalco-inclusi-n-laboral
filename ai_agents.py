@@ -81,32 +81,52 @@ Incluye referencias legales específicas (artículos de ley).
 NO uses formato markdown, solo texto plano en un párrafo continuo.
 """
 
-PROMPT_VISION_COMPLETO = """
-Eres el Agente A-Vision: Analista de Riesgos y Accesibilidad Arquitectónica.
-Debes analizar TODAS las imágenes proporcionadas y generar un análisis completo.
+PROMPT_CLASIFICACION_Y_ANALISIS = """
+Eres el Agente A-Vision: Experto en Accesibilidad Física e Inclusión Laboral.
+Analiza detenidamente la imagen adjunta.
+
+Tu tarea consta de dos partes:
+1. CLASIFICACIÓN: Identifica qué tipo de espacio físico se muestra principalmente en la imagen. Clasifícalo estrictamente en una de estas categorías:
+   - "entrada": Entrada principal, acceso exterior, fachada, puerta de ingreso.
+   - "baño": Batería de baños, inodoro, lavamanos, sanitarios.
+   - "cafeteria": Comedor, cocina, cafetería, área de almuerzo.
+   - "otro": Pasillos, rampas, oficinas, áreas de trabajo generales.
+
+2. ANÁLISIS DE ACCESIBILIDAD: Genera un análisis técnico detallado (mínimo 100 palabras) sobre la accesibilidad física y barreras de este espacio específico, referenciando las leyes colombianas (Ley 1618 de 2013, NTC 4143, NTC 6047).
 
 {marco_legal}
 
-INSTRUCCIONES:
-Analiza las {num_fotos} imagen(es) adjunta(s) del puesto de trabajo y genera
-un JSON con la siguiente estructura exacta. Cada campo debe contener un párrafo
-técnico detallado (mínimo 80 palabras) con referencias legales colombianas.
-
-Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones adicionales:
-
+Responde estrictamente en formato JSON con la siguiente estructura (sin markdown ni ```json):
 {{
-    "acceso_principal": "Análisis de la entrada principal del establecimiento...",
-    "banos": "Análisis de la batería de baños para empleados...",
-    "cafeteria": "Análisis del área de cafetería/comedor (si no se evidencia, indicar que no se evidenció)...",
-    "rampas": "Análisis de rampas y desniveles...",
+    "categoria": "entrada" | "baño" | "cafeteria" | "otro",
+    "analisis": "Párrafo técnico continuo de análisis detallado..."
+}}
+"""
+
+PROMPT_SINTESIS_VISION = """
+Eres el Agente A-Vision: Experto en Accesibilidad e Inclusión Laboral.
+A partir de los análisis de las fotos de las instalaciones que ya se realizaron:
+
+ANALISIS INDIVIDUALES DISPONIBLES:
+{analisis_individuales}
+
+Tu tarea es generar un análisis completo y unificado para todos los aspectos del puesto de trabajo en formato JSON. Cada campo debe ser un párrafo técnico continuo (mínimo 80 palabras) con referencias a la normativa colombiana y al Programa Talento Sin Barreras.
+Si un área (entrada, baños, cafetería) NO tiene análisis individual disponible en la lista de arriba, redacta un análisis técnico preventivo indicando que no hay registro fotográfico pero se sugieren mejoras generales.
+
+Responde ÚNICAMENTE con el JSON, sin formato markdown ni ```json:
+{{
+    "acceso_principal": "Análisis de la entrada principal...",
+    "banos": "Análisis de la batería de baños...",
+    "cafeteria": "Análisis del área de cafetería/comedor...",
+    "rampas": "Análisis de rampas, desniveles y escaleras...",
     "informacion_comunicacion": "Análisis de señalización y sistemas de comunicación...",
     "actitudinales_sociales": "Análisis de barreras actitudinales y sociales...",
-    "condiciones_biologico": "Exposición a riesgos biológicos en el puesto...",
-    "condiciones_psicosocial": "Factores psicosociales del puesto...",
-    "condiciones_biomecanico": "Riesgos biomecánicos del puesto...",
-    "condiciones_fisico": "Condiciones físicas del entorno (iluminación, temperatura)...",
-    "condiciones_quimico": "Exposición a sustancias químicas...",
-    "condiciones_seguridad": "Condiciones de seguridad (riesgo locativo, mecánico)..."
+    "condiciones_biologico": "Exposición a riesgos biológicos...",
+    "condiciones_psicosocial": "Factores de riesgo psicosocial...",
+    "condiciones_biomecanico": "Riesgos biomecánicos (posturas, movimientos, cargas)...",
+    "condiciones_fisico": "Condiciones físicas (iluminación, ruido, ventilación)...",
+    "condiciones_quimico": "Exposición a sustancias químicas (si no aplica, justificar)...",
+    "condiciones_seguridad": "Condiciones de seguridad (riesgo locativo, emergencias)..."
 }}
 """
 
@@ -239,79 +259,96 @@ class SistemaMultiagente:
 
     def ejecutar_vision(self, rutas_fotos: list) -> dict:
         """
-        Ejecuta el Agente A-Vision sobre las fotos proporcionadas.
-
-        Args:
-            rutas_fotos: Lista de rutas absolutas a las imágenes.
-
-        Returns:
-            dict con los análisis de accesibilidad por zona.
+        Ejecuta el Agente A-Vision sobre las fotos proporcionadas
+        clasificándolas primero individualmente.
         """
         self._log("🔍 [A-Vision] Iniciando análisis visual de accesibilidad...")
 
-        # Preparar imágenes para Gemini
-        image_parts = []
+        analisis_individuales = []
+        fotos_mapeadas = {}
+        textos_por_categoria = {"entrada": "", "baño": "", "cafeteria": "", "otro": ""}
+
         for ruta in rutas_fotos:
-            if os.path.exists(ruta):
-                with open(ruta, "rb") as f:
-                    img_data = f.read()
+            if not os.path.exists(ruta):
+                continue
+            
+            self._log(f"   📷 Procesando imagen: {os.path.basename(ruta)}")
+            with open(ruta, "rb") as f:
+                img_data = f.read()
 
-                # Determinar tipo MIME
-                ext = Path(ruta).suffix.lower()
-                mime_map = {
-                    ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
-                    ".png": "image/png",
-                    ".webp": "image/webp",
-                }
-                mime_type = mime_map.get(ext, "image/jpeg")
+            ext = Path(ruta).suffix.lower()
+            mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+            mime_type = mime_map.get(ext, "image/jpeg")
 
-                image_parts.append({
-                    "mime_type": mime_type,
-                    "data": img_data,
-                })
-                self._log(f"   ✓ Imagen cargada: {os.path.basename(ruta)}")
-            else:
-                self._log(f"   ✗ Imagen no encontrada: {ruta}")
+            img_part = {"mime_type": mime_type, "data": img_data}
+            prompt = PROMPT_CLASIFICACION_Y_ANALISIS.format(marco_legal=MARCO_LEGAL)
 
-        if not image_parts:
-            self._log("   ⚠ No se encontraron imágenes para analizar.")
-            return self._vision_default()
+            try:
+                response = self.model.generate_content(
+                    [prompt, img_part],
+                    generation_config=genai.GenerationConfig(temperature=0.2, max_output_tokens=1024)
+                )
+                texto = response.text.strip()
+                texto = re.sub(r'^```json\s*', '', texto)
+                texto = re.sub(r'\s*```$', '', texto)
+                
+                resp_json = json.loads(texto)
+                cat = resp_json.get("categoria", "otro").lower()
+                
+                # Aceptar variaciones y comillas extras
+                if "bañ" in cat or "bano" in cat:
+                    cat = "baño"
+                elif "entr" in cat:
+                    cat = "entrada"
+                elif "caf" in cat:
+                    cat = "cafeteria"
+                else:
+                    cat = "otro"
 
-        # Construir prompt
-        prompt = PROMPT_VISION_COMPLETO.format(
-            marco_legal=MARCO_LEGAL,
-            num_fotos=len(image_parts),
-        )
+                analisis = resp_json.get("analisis", "")
+                self._log(f"      ↳ Clasificada como: '{cat}'")
 
-        # Llamar a Gemini
+                if textos_por_categoria[cat]:
+                    textos_por_categoria[cat] += "\n\n" + analisis
+                else:
+                    textos_por_categoria[cat] = analisis
+
+                if cat == "entrada" and 2 not in fotos_mapeadas:
+                    fotos_mapeadas[2] = ruta
+                elif cat == "baño" and 4 not in fotos_mapeadas:
+                    fotos_mapeadas[4] = ruta
+                elif cat == "cafeteria" and 6 not in fotos_mapeadas:
+                    fotos_mapeadas[6] = ruta
+
+                analisis_individuales.append(f"FOTO TIPO: {cat}\nANALISIS: {analisis}")
+
+            except Exception as e:
+                self._log(f"      ✗ Error analizando imagen: {e}")
+
+        self._log("   📡 Sintetizando análisis integral del entorno...")
+        
+        texto_individuales = "\n---\n".join(analisis_individuales) if analisis_individuales else "No se proporcionaron fotos."
+        prompt_sintesis = PROMPT_SINTESIS_VISION.format(analisis_individuales=texto_individuales)
+
         try:
-            self._log(f"   📡 Enviando {len(image_parts)} imagen(es) a Gemini ({MODELO_GEMINI})...")
             response = self.model.generate_content(
-                [prompt] + image_parts,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=4096,
-                ),
+                prompt_sintesis,
+                generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=4096)
             )
-
-            # Parsear respuesta JSON
-            texto = response.text.strip()
-            # Limpiar posible markdown
-            texto = re.sub(r'^```json\s*', '', texto)
-            texto = re.sub(r'\s*```$', '', texto)
-
-            resultado = json.loads(texto)
+            texto_sintesis = response.text.strip()
+            texto_sintesis = re.sub(r'^```json\s*', '', texto_sintesis)
+            texto_sintesis = re.sub(r'\s*```$', '', texto_sintesis)
+            
+            resultado = json.loads(texto_sintesis)
+            resultado["fotos_mapeadas"] = fotos_mapeadas
             self._log("   ✓ [A-Vision] Análisis visual completado exitosamente.")
             return resultado
 
-        except json.JSONDecodeError as e:
-            self._log(f"   ✗ Error parseando respuesta JSON: {e}")
-            self._log(f"   Respuesta raw: {response.text[:500]}...")
-            return self._vision_default()
         except Exception as e:
-            self._log(f"   ✗ Error en API de Gemini: {e}")
-            return self._vision_default()
+            self._log(f"   ✗ Error en síntesis de A-Vision: {e}")
+            res_def = self._vision_default()
+            res_def["fotos_mapeadas"] = fotos_mapeadas
+            return res_def
 
     def _vision_default(self):
         """Retorna análisis por defecto si falla la visión."""
@@ -434,7 +471,8 @@ class SistemaMultiagente:
 
         # Fase 2: Diagnóstico Jurídico
         cb("Fase 2: Diagnóstico Jurídico (A-Legal)...", 0.5)
-        analisis_legal = self.ejecutar_legal(datos_cargo, analisis_vision)
+        analisis_vision_clean = {k: v for k, v in analisis_vision.items() if k != "fotos_mapeadas"}
+        analisis_legal = self.ejecutar_legal(datos_cargo, analisis_vision_clean)
 
         # Fase 3: Compilar resultados
         cb("Fase 3: Compilando resultados...", 0.8)
@@ -477,6 +515,7 @@ class SistemaMultiagente:
             "discapacidades_sugeridas": analisis_legal.get("discapacidades_compatibles", []),
             "ajustes_razonables": analisis_legal.get("ajustes_razonables", []),
             "conclusiones": analisis_legal.get("conclusiones", ""),
+            "fotos_mapeadas": analisis_vision.get("fotos_mapeadas", {})
         }
 
         cb("Análisis completo finalizado.", 1.0)
@@ -493,19 +532,35 @@ class SistemaMultiagente:
 
 def extraer_texto_docx(ruta_docx: str) -> str:
     """
-    Extrae todo el texto de un archivo .docx (párrafos + tablas).
-
-    Args:
-        ruta_docx: Ruta al archivo .docx.
-
-    Returns:
-        str con todo el texto del documento.
+    Extrae todo el texto de un archivo .docx (párrafos, tablas, encabezados y pies).
     """
     from docx import Document
 
     doc = Document(ruta_docx)
     textos = []
 
+    # Extraer encabezados y pies de página
+    for section in doc.sections:
+        if section.header:
+            for p in section.header.paragraphs:
+                if p.text.strip():
+                    textos.append(p.text.strip())
+            for t in section.header.tables:
+                for row in t.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            textos.append(cell.text.strip())
+        if section.footer:
+            for p in section.footer.paragraphs:
+                if p.text.strip():
+                    textos.append(p.text.strip())
+            for t in section.footer.tables:
+                for row in t.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            textos.append(cell.text.strip())
+
+    # Cuerpo principal
     for p in doc.paragraphs:
         if p.text.strip():
             textos.append(p.text.strip())
@@ -519,44 +574,136 @@ def extraer_texto_docx(ruta_docx: str) -> str:
     return "\n".join(textos)
 
 
+def extraer_texto_pdf(ruta_pdf: str) -> str:
+    try:
+        import pypdf
+        textos = []
+        with open(ruta_pdf, "rb") as f:
+            reader = pypdf.PdfReader(f)
+            for page in reader.pages:
+                t = page.extract_text()
+                if t:
+                    textos.append(t.strip())
+        return "\n".join(textos)
+    except Exception as e:
+        return f"Error extrayendo PDF: {e}"
+
+
+def extraer_texto_excel(ruta_excel: str) -> str:
+    try:
+        import pandas as pd
+        textos = []
+        xls = pd.ExcelFile(ruta_excel)
+        for sheet_name in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+            textos.append(f"--- Hoja: {sheet_name} ---")
+            textos.append(df.to_string(index=False))
+        return "\n".join(textos)
+    except Exception as e:
+        return f"Error extrayendo Excel: {e}"
+
+
+def extraer_texto_plano(ruta_txt: str) -> str:
+    for encoding in ["utf-8", "latin-1", "cp1252"]:
+        try:
+            with open(ruta_txt, "r", encoding=encoding) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    return ""
+
+
+def extraer_texto_de_archivo(ruta: str) -> str:
+    ext = Path(ruta).suffix.lower()
+    if ext == ".docx":
+        return extraer_texto_docx(ruta)
+    elif ext == ".pdf":
+        return extraer_texto_pdf(ruta)
+    elif ext in [".xlsx", ".xls"]:
+        return extraer_texto_excel(ruta)
+    elif ext in [".txt", ".csv", ".json"]:
+        return extraer_texto_plano(ruta)
+    elif ext == ".doc":
+        try:
+            return extraer_texto_docx(ruta)
+        except Exception:
+            pass
+        try:
+            with open(ruta, "rb") as f:
+                content = f.read()
+            import re
+            strings = re.findall(rb'[a-zA-Z0-9\s\.,;:!\?\-\(\)\[\]\{\}\/\\_@#\$%&\*\+\=\<\>\'\"]{4,}', content)
+            text = ""
+            for s in strings:
+                try:
+                    text += s.decode('utf-8') + "\n"
+                except Exception:
+                    try:
+                        text += s.decode('latin-1') + "\n"
+                    except Exception:
+                        pass
+            return text
+        except Exception as e:
+            return f"No se pudo extraer texto del archivo .doc: {e}"
+    else:
+        try:
+            return extraer_texto_plano(ruta)
+        except Exception as e:
+            return f"Formato no soportado: {e}"
+
+
 def extraer_datos_manual(ruta_manual: str, api_key: str = None) -> dict:
     """
-    Extrae datos del Manual de Funciones usando Gemini o parsing básico.
-
-    Args:
-        ruta_manual: Ruta al archivo .docx del manual.
-        api_key: Clave de Gemini (opcional, para extracción con IA).
-
-    Returns:
-        dict con datos extraídos del manual.
+    Extrae datos del Manual de Funciones usando Gemini.
+    Soporta docx, pdf, xls, txt, doc.
     """
-    texto = extraer_texto_docx(ruta_manual)
+    texto = extraer_texto_de_archivo(ruta_manual)
 
     if api_key and GEMINI_DISPONIBLE:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(MODELO_GEMINI)
 
         prompt = f"""
-Analiza el siguiente texto de un Manual de Funciones y extrae la información
-en formato JSON. Responde ÚNICAMENTE con el JSON (sin markdown):
+Analiza el siguiente texto de un Manual de Funciones/Descripción de Cargo y extrae la información en formato JSON. Responde ÚNICAMENTE con el JSON (sin markdown ni ```json).
+Si un dato no existe en el manual, déjalo como una cadena vacía "".
 
 TEXTO DEL MANUAL:
-{texto[:8000]}
+{texto[:12000]}
 
 JSON requerido:
 {{
     "empresa_nombre": "Nombre de la empresa",
     "empresa_actividad": "Actividad económica",
     "empresa_nit": "NIT",
-    "empresa_sede": "Sede/Ciudad",
+    "empresa_sede": "Sede o Ciudad",
+    "empresa_direccion": "Dirección",
+    "empresa_telefono": "Teléfono",
+    "empresa_fecha": "Fecha de actualización o elaboración",
     "cargo_nombre": "Nombre del cargo",
     "cargo_tipo": "Tipo (Operativo/Administrativo/etc.)",
     "cargo_dependencia": "Dependencia o área",
     "cargo_reporta": "Cargo al que reporta",
     "cargo_objetivo": "Objetivo principal del cargo",
-    "cargo_requisitos_educacion": "Nivel educativo requerido",
-    "cargo_requisitos_experiencia": "Experiencia requerida",
-    "cargo_tareas": ["Tarea 1", "Tarea 2", "..."]
+    "cargo_requisito_educativo": "Nivel educativo requerido",
+    "cargo_requisito_certificaciones": "Certificaciones requeridas",
+    "cargo_requisito_conocimientos": "Conocimientos específicos",
+    "cargo_requisito_experiencia": "Experiencia requerida",
+    "cargo_requisito_entrenamiento": "Entrenamiento requerido",
+    "cargo_requisito_disponibilidad": "Disponibilidad (turnos, viajes, etc.)",
+    "cargo_requisito_examenes": "Exámenes médicos",
+    "cargo_tareas": ["Tarea 1", "Tarea 2", "Tarea 3", "Tarea 4", "Tarea 5"],
+    "condiciones_jornada": "Jornada laboral",
+    "condiciones_turnos": "Turnos",
+    "condiciones_rotativos": "Turnos rotativos",
+    "condiciones_rotacion": "Rotación de puestos",
+    "condiciones_horas_extras": "Horas extras",
+    "recursos_equipos": "Equipos de oficina/cómputo",
+    "recursos_mobiliario": "Mobiliario",
+    "recursos_maquinas": "Máquinas/vehículos",
+    "recursos_herramientas": "Herramientas manuales",
+    "recursos_materiales": "Materiales e insumos",
+    "recursos_accesorios": "Accesorios de dotación",
+    "recursos_epp": "Elementos de Protección Personal (EPP)"
 }}
 """
         try:
@@ -564,7 +711,7 @@ JSON requerido:
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.1,
-                    max_output_tokens=4096,
+                    max_output_tokens=8192,
                 ),
             )
             texto_resp = response.text.strip()
@@ -574,7 +721,6 @@ JSON requerido:
         except Exception:
             pass
 
-    # Fallback: retornar texto crudo
     return {"texto_crudo": texto}
 
 

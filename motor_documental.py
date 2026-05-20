@@ -18,129 +18,22 @@ class DatosProyecto:
     Acepta un diccionario de configuración para poblar cada campo.
     """
 
-    # Valores por defecto (ejemplo Mas por Menos)
+    # Valores por defecto vacíos
     DEFAULTS = {
-        "empresa": [
-            "Supermercados Mas por Menos SAS",
-            "Comercio al por menor en establecimientos no especializados, "
-            "con surtido compuesto principalmente por alimentos, bebidas y tabaco",
-            "900.119.072",
-            "Bucaramanga",
-            "Por confirmar con la empresa",
-            "Por confirmar con la empresa",
-            "Mayo de 2026",
-        ],
-        "cargo_encabezado": [
-            "Vendedor / Surtidor – Oficios Varios",
-            "Operativo",
-            "Punto de Venta – Sala de Ventas",
-            "Jefe de Zona",
-        ],
-        "cargo_objetivo": (
-            "Apoyar de forma integral la operación del punto de venta en el área de surtido, "
-            "dando un servicio con calidad y calidez de acuerdo con los protocolos establecidos "
-            "por la compañía."
-        ),
-        "cargo_requisitos": [
-            "Básica secundaria",
-            "No se requieren certificaciones adicionales",
-            "Servicio al cliente, surtido, manejo de inventarios",
-            "Experiencia en logística, despachos, servicio al cliente y ventas",
-            "Entrenamiento en el puesto de trabajo con acompañamiento del Jefe de Zona",
-            "Tiempo completo, disponibilidad para turnos rotativos",
-            "Exámenes médicos ocupacionales de ingreso y periódicos "
-            "según el profesiograma de la empresa",
-        ],
-        "cargo_tareas": [
-            "1. Surtir y resurtir los productos agotados en el piso de venta.",
-            "2. Asegurarse de que las exhibiciones estén bien abastecidas.",
-            "3. Confirmar que las etiquetas coincidan con los precios.",
-            "4. Examinar la fecha de vencimiento de los productos.",
-            "5. Frentear la mercancía ubicada en los lineales.",
-            "6. Desarmar las cajas de cartón y almacenarlas.",
-            "7. Almacenar cajas vacías correctamente.",
-            "8. Cumplir con la misión de venta y promover productos.",
-            "9. Gestionar la devolución de implementos.",
-            "10. Llenar formato de re-empaque.",
-            "11. Reportar productos faltantes.",
-            "12. Ubicar el material P.O.P.",
-            "13. Seguir las normas de servicio al cliente.",
-        ],
-        "condiciones_org": [
-            "Lunes a sábado, jornada diurna conforme a la Ley 2466 de 2025.",
-            "Se contemplan turnos de apertura y cierre del punto de venta.",
-            "Turnos rotativos según programación del Jefe de Zona.",
-            "Rotación entre secciones del punto de venta según necesidad.",
-            "Eventualmente se pueden presentar horas extras conforme a la ley.",
-        ],
-        "recursos": [
-            "Computador de punto de venta, lectores de código de barras, básculas digitales.",
-            "Estanterías (lineales), góndolas, exhibidores, mesas de trabajo.",
-            "No aplica maquinaria pesada para este cargo.",
-            "Gato hidráulico (estibador manual), escaleras tipo tijera, carros transportadores.",
-            "Bolsas de empaque, etiquetas de precios, material P.O.P., formatos impresos.",
-            "Uniformes de dotación institucional.",
-            "Guantes de protección para manipulación de productos, calzado antideslizante.",
-        ],
-        "accesibilidad": [
-            "Pendiente de análisis visual por A-Vision.",
-            "",
-            "Pendiente de análisis visual por A-Vision.",
-            "",
-            "Pendiente de análisis visual por A-Vision.",
-            "No se cuenta con registro fotográfico.",
-            "Pendiente de análisis visual por A-Vision.",
-            "Pendiente de análisis visual por A-Vision.",
-            "Pendiente de análisis visual por A-Vision.",
-        ],
-        "condiciones_amb": [
-            "Pendiente de análisis.",
-            "Pendiente de análisis.",
-            "Pendiente de análisis.",
-            "Pendiente de análisis.",
-            "Pendiente de análisis.",
-        ],
-        "condiciones_seguridad": [
-            "Pendiente de análisis.",
-            "No aplica",
-            "Pendiente de análisis.",
-            "Matriz de identificación de peligros (GTC 45)",
-        ],
-        "competencias": [
-            # INTELECTUALES (8)
-            "Medio", "Medio", "Medio", "Bajo", "Medio", "Bajo", "Bajo", "Alto",
-            # PERSONALES (2)
-            "Alto", "Medio",
-            # INTERPERSONALES (6)
-            "Alto", "Alto", "Bajo", "Medio", "Alto", "Medio",
-            # ORGANIZACIONALES (4)
-            "Medio", "Alto", "Medio", "Medio",
-            # TECNOLÓGICAS (2)
-            "Bajo", "Bajo",
-            # EMPRESARIALES (5)
-            "Bajo", "Bajo", "Medio", "Alto", "Bajo",
-            # FÍSICAS (8)
-            "Bajo", "Alto", "Bajo", "Alto", "Medio", "Alto", "Bajo", "Bajo",
-        ],
-        "discapacidades_sugeridas": [
-            "Auditiva",
-            "Intelectual Leve",
-        ],
-        "ajustes_razonables": [
-            {
-                "tipo": "Auditiva",
-                "fisicas": "Pendiente de análisis por A-Legal.",
-                "comunicacion": "Pendiente de análisis por A-Legal.",
-                "actitudinales": "Pendiente de análisis por A-Legal.",
-            },
-            {
-                "tipo": "Intelectual Leve",
-                "fisicas": "Pendiente de análisis por A-Legal.",
-                "comunicacion": "Pendiente de análisis por A-Legal.",
-                "actitudinales": "Pendiente de análisis por A-Legal.",
-            },
-        ],
-        "conclusiones": "Pendiente de generación por el sistema multiagente.",
+        "empresa": [""] * 7,
+        "cargo_encabezado": [""] * 4,
+        "cargo_objetivo": "",
+        "cargo_requisitos": [""] * 7,
+        "cargo_tareas": [""] * 13,
+        "condiciones_org": [""] * 5,
+        "recursos": [""] * 7,
+        "accesibilidad": [""] * 9,
+        "condiciones_amb": [""] * 5,
+        "condiciones_seguridad": [""] * 4,
+        "competencias": ["Medio"] * 35,
+        "discapacidades_sugeridas": [],
+        "ajustes_razonables": [],
+        "conclusiones": "",
     }
 
     def __init__(self, config: dict = None):

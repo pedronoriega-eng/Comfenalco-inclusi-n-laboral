@@ -588,9 +588,9 @@ with st.sidebar:
     st.markdown("**📖 Manual de Funciones**")
     manual_file = st.file_uploader(
         "Subir Manual de Funciones",
-        type=["docx", "pdf"],
+        type=["docx", "doc", "pdf", "xls", "xlsx", "txt"],
         key="upload_manual",
-        help="PDF o Word con las funciones del nuevo cargo a analizar.",
+        help="Sube el archivo del manual de funciones o descripción de cargo (Word, PDF, Excel, TXT).",
     )
     if manual_file:
         ruta = guardar_archivo_temporal(manual_file)
@@ -904,8 +904,7 @@ with tab_analisis:
             <p style="color: #B0B0B0; font-size: 0.85rem;">
                 Sin API Key de Gemini, el sistema funciona en modo manual.<br>
                 Puede editar todos los datos directamente en la pestaña
-                <strong>"Datos del Informe"</strong>.<br>
-                Los datos de ejemplo (Mas por Menos) están pre-cargados.
+                <strong>"Datos del Informe"</strong>.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -950,11 +949,70 @@ with tab_datos:
         <div class="section-title">✏️ Datos del Informe — Edición y Revisión</div>
         <p style="color: #B0B0B0; font-size: 0.85rem;">
             Estos datos se inyectarán en la plantilla Word.
-            Están pre-cargados con los datos de ejemplo (Mas por Menos).
-            Si ejecutó el análisis con IA, los campos se actualizaron automáticamente.
+            Puede editarlos manualmente o extraerlos del Manual con IA usando el botón de abajo.
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+    if st.session_state.manual_cargado and st.session_state.api_verificada:
+        if st.button("🪄 Extraer Datos del Manual con IA", type="primary", use_container_width=True):
+            with st.spinner("Leyendo documento y extrayendo información..."):
+                try:
+                    manual_data = extraer_datos_manual(
+                        st.session_state.manual_path,
+                        obtener_api_key(),
+                    )
+                    st.session_state.manual_datos = manual_data
+                    
+                    st.session_state["emp_0"] = manual_data.get("empresa_nombre", "")
+                    st.session_state["emp_1"] = manual_data.get("empresa_actividad", "")
+                    st.session_state["emp_2"] = manual_data.get("empresa_nit", "")
+                    st.session_state["emp_3"] = manual_data.get("empresa_sede", "")
+                    st.session_state["emp_4"] = manual_data.get("empresa_direccion", "")
+                    st.session_state["emp_5"] = manual_data.get("empresa_telefono", "")
+                    st.session_state["emp_6"] = manual_data.get("empresa_fecha", "")
+                    
+                    st.session_state["cargo_0"] = manual_data.get("cargo_nombre", "")
+                    st.session_state["cargo_1"] = manual_data.get("cargo_tipo", "")
+                    st.session_state["cargo_2"] = manual_data.get("cargo_dependencia", "")
+                    st.session_state["cargo_3"] = manual_data.get("cargo_reporta", "")
+                    st.session_state["cargo_obj"] = manual_data.get("cargo_objetivo", "")
+                    
+                    st.session_state["req_0"] = manual_data.get("cargo_requisito_educativo", "")
+                    st.session_state["req_1"] = manual_data.get("cargo_requisito_certificaciones", "")
+                    st.session_state["req_2"] = manual_data.get("cargo_requisito_conocimientos", "")
+                    st.session_state["req_3"] = manual_data.get("cargo_requisito_experiencia", "")
+                    st.session_state["req_4"] = manual_data.get("cargo_requisito_entrenamiento", "")
+                    st.session_state["req_5"] = manual_data.get("cargo_requisito_disponibilidad", "")
+                    st.session_state["req_6"] = manual_data.get("cargo_requisito_examenes", "")
+                    
+                    tareas_extraidas = manual_data.get("cargo_tareas", [])
+                    if isinstance(tareas_extraidas, list):
+                        for i in range(13):
+                            if i < len(tareas_extraidas):
+                                st.session_state[f"tarea_{i}"] = str(tareas_extraidas[i])
+                            else:
+                                st.session_state[f"tarea_{i}"] = ""
+
+                    st.session_state["cond_0"] = manual_data.get("condiciones_jornada", "")
+                    st.session_state["cond_1"] = manual_data.get("condiciones_turnos", "")
+                    st.session_state["cond_2"] = manual_data.get("condiciones_rotativos", "")
+                    st.session_state["cond_3"] = manual_data.get("condiciones_rotacion", "")
+                    st.session_state["cond_4"] = manual_data.get("condiciones_horas_extras", "")
+
+                    st.session_state["rec_0"] = manual_data.get("recursos_equipos", "")
+                    st.session_state["rec_1"] = manual_data.get("recursos_mobiliario", "")
+                    st.session_state["rec_2"] = manual_data.get("recursos_maquinas", "")
+                    st.session_state["rec_3"] = manual_data.get("recursos_herramientas", "")
+                    st.session_state["rec_4"] = manual_data.get("recursos_materiales", "")
+                    st.session_state["rec_5"] = manual_data.get("recursos_accesorios", "")
+                    st.session_state["rec_6"] = manual_data.get("recursos_epp", "")
+
+                    st.success("✓ Datos extraídos y campos actualizados.")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error en la extracción: {e}")
 
     # Obtener defaults
     defaults = DatosProyecto.DEFAULTS
