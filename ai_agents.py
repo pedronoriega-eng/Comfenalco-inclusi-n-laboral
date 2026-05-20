@@ -257,7 +257,7 @@ class SistemaMultiagente:
             self._log("   ⚠ No hay fotos para analizar.")
             return self._vision_default()
 
-        # 1. Preparar las imágenes y redimensionarlas para evitar payload muy grande
+        # 1. Preparar las imágenes y redimensionarlas
         content_parts = [PROMPT_VISION_BATCH.format(marco_legal=MARCO_LEGAL)]
         rutas_validas = []
 
@@ -266,17 +266,13 @@ class SistemaMultiagente:
                 continue
             
             try:
-                # Redimensionar a máx 800x800 para que 24 imágenes pesen ~2-3MB total
                 img = Image.open(ruta)
                 img.thumbnail((800, 800))
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=85)
-                img_data = buffer.getvalue()
                 
                 content_parts.append(f"--- FOTO {len(rutas_validas)} ---")
-                content_parts.append({"mime_type": "image/jpeg", "data": img_data})
+                content_parts.append(img)
                 rutas_validas.append(ruta)
                 self._log(f"   📷 Cargada: {os.path.basename(ruta)}")
             except Exception as e:
@@ -286,18 +282,28 @@ class SistemaMultiagente:
             self._log("   ⚠ Ninguna foto pudo ser leída correctamente.")
             return self._vision_default()
 
-        # 2. Llamada única a Gemini con todas las fotos
+        # 2. Llamada única a Gemini con todas las fotos, desactivando filtros de seguridad
         self._log(f"   📡 Enviando {len(rutas_validas)} fotos simultáneamente a Gemini...")
         try:
             response = self.model.generate_content(
                 content_parts,
-                generation_config=genai.GenerationConfig(temperature=0.2, max_output_tokens=4096)
+                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=4096),
+                safety_settings={
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                }
             )
             
             texto = response.text.strip()
-            texto = re.sub(r'^```json\s*', '', texto)
-            texto = re.sub(r'\s*```$', '', texto)
             
+            # Extracción robusta de JSON
+            start = texto.find('{')
+            end = texto.rfind('}')
+            if start != -1 and end != -1:
+                texto = texto[start:end+1]
+                
             resp_json = json.loads(texto)
             mapeo = resp_json.get("mapeo", {})
             analisis = resp_json.get("analisis", {})
@@ -305,27 +311,35 @@ class SistemaMultiagente:
             # Construir fotos_mapeadas
             fotos_mapeadas = {}
             # Fila 2 = Entrada
-            idx_entrada = mapeo.get("entrada", -1)
-            if idx_entrada != -1 and 0 <= idx_entrada < len(rutas_validas):
-                fotos_mapeadas[2] = rutas_validas[idx_entrada]
+            try:
+                idx_entrada = int(mapeo.get("entrada", -1))
+                if idx_entrada != -1 and 0 <= idx_entrada < len(rutas_validas):
+                    fotos_mapeadas[2] = rutas_validas[idx_entrada]
+            except (ValueError, TypeError): pass
             
             # Fila 4 = Baños
-            idx_banos = mapeo.get("banos", -1)
-            if idx_banos != -1 and 0 <= idx_banos < len(rutas_validas):
-                fotos_mapeadas[4] = rutas_validas[idx_banos]
+            try:
+                idx_banos = int(mapeo.get("banos", -1))
+                if idx_banos != -1 and 0 <= idx_banos < len(rutas_validas):
+                    fotos_mapeadas[4] = rutas_validas[idx_banos]
+            except (ValueError, TypeError): pass
             
             # Fila 6 = Cafetería
-            idx_cafeteria = mapeo.get("cafeteria", -1)
-            if idx_cafeteria != -1 and 0 <= idx_cafeteria < len(rutas_validas):
-                fotos_mapeadas[6] = rutas_validas[idx_cafeteria]
+            try:
+                idx_cafeteria = int(mapeo.get("cafeteria", -1))
+                if idx_cafeteria != -1 and 0 <= idx_cafeteria < len(rutas_validas):
+                    fotos_mapeadas[6] = rutas_validas[idx_cafeteria]
+            except (ValueError, TypeError): pass
 
             analisis["fotos_mapeadas"] = fotos_mapeadas
             self._log("   ✓ [A-Vision] Análisis visual en lote completado exitosamente.")
             return analisis
 
         except Exception as e:
-            self._log(f"   ✗ Error en ejecución en lote de A-Vision: {e}")
+            error_msg = str(e)
+            self._log(f"   ✗ Error en ejecución en lote de A-Vision: {error_msg}")
             res_def = self._vision_default()
+            res_def["acceso_principal"] = f"ERROR DE IA: {error_msg}. Por favor revise los logs o intente con menos fotos."
             res_def["fotos_mapeadas"] = {}
             return res_def
 
